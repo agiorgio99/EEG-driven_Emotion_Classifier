@@ -1,34 +1,34 @@
 # EEG-Based Emotion Recognition Using LLaMA
 
-This repository contains a Python script for **EEG-based emotion recognition** leveraging a [LLaMA-based](https://arxiv.org/abs/2302.13971) language model, fine-tuned to classify **valence and arousal** into three discrete levels each. The code is adapted from a Jupyter Notebook (originally used in an interactive environment) and shows data preprocessing, dataset loading, model definition, training, and testing steps.
+The project aims to classify, from the EEG signals in the **DEAP** dataset, **valence and arousal** emotions into three discrete levels each, leveraging **LoRA** finetuning on **LLaMA 3.1 8B** model. The code is now divided into two files: one jupyter notebook (*EEG_Driven_Emotion_Classifier.ipynb*) handling data preprocessing, loading, training, and testing, and a separate python file (*model.py*) containing the model definition.
 
 ## Method Overview
 
-1. **Data Preprocessing (DEAP dataset)**  
-   - Loads EEG signals for each subject.  
-   - Applies **z-score normalization**.  
-   - Converts signals into overlapping segments.  
-   - **Quantizes** the EEG amplitudes into discrete symbols (e.g., binary codes).  
+1. **Data Preprocessing (DEAP dataset)**
+   - Loads EEG signals for each subject from `.dat` files.
+   - Applies **z-score normalization**.
+   - Converts signals into **overlapping segments**.
+   - **Quantizes** the EEG amplitudes into discrete symbols (e.g., binary codes).
 
-2. **Modeling**  
-   - Uses a **LLaMA**-based model in 4-bit precision.  
-   - Adds a **LoRA** (Low-Rank Adaptation) layer for parameter-efficient finetuning.  
-   - Outputs **6 logits**: (3 for valence + 3 for arousal).  
+2. **Modeling**
+   - Uses a **LLaMA**-based model in **4-bit precision**.
+   - Adds a **LoRA** (Low-Rank Adaptation) layer for parameter-efficient finetuning.
+   - Includes a **classification head** that outputs **6 logits** (3 for valence + 3 for arousal).
 
-3. **Training and Testing**  
-   - Splits the dataset into training, validation, and test sets.  
-   - Minimizes **cross-entropy loss** on the valence/arousal classification.  
-   - Tracks **accuracy** (valence, arousal, and overall).  
+3. **Training and Testing**
+   - Splits the dataset into **training**, **validation**, and **test** sets.
+   - Minimizes **cross-entropy loss** on the valence/arousal classification.
+   - Tracks **accuracy** for valence, arousal, and overall performance.
+   - Saves experiment outputs (model weights, logs, plots) in a dedicated folder.
 
 ## Key Results
 
-- The script logs training accuracy and validation accuracy at each epoch.  
-- After training, a test evaluation reports final accuracy for valence, arousal, and overall classification.
-- Typical results (for a small subset of the DEAP dataset) might range from 65–75% overall accuracy, though actual performance varies with hyperparameters, dataset splits, and model size.
+- The code logs training and validation losses/accuracies **per epoch**, and then prints final test results.
+- Metrics include **valence accuracy**, **arousal accuracy**, and an **overall accuracy** (both valence and arousal correct).
 
 ## Installation
 
-Below are the main packages you need. (The script includes commands to install them if run in a Python context that supports shell commands, but you can also install them manually.)
+Below are the main packages required. (In the provided scripts, `%pip install` commands are used if running in an environment that supports IPython magic. Otherwise, install via CLI.)
 
 1. [bitsandbytes](https://pypi.org/project/bitsandbytes/)  
 2. [transformers](https://pypi.org/project/transformers/)  
@@ -48,29 +48,38 @@ You can install them all via:
 ```bash
 pip install -U bitsandbytes transformers accelerate peft python-dotenv einops scikit-learn scipy matplotlib tabulate tqdm huggingface_hub
 ```
+
 ## How to Run
 
-1. **Clone or download this repository.**  
+1. **Clone or Download This Repository**  
+   Make sure the folder structure preserves the code files (`model.py` or `model_definition.py`, plus the main script that handles preprocessing and training).
 
-2. **Acquire the DEAP dataset and place its preprocessed Python files (.dat files) in ./DEAP_Dataset/data_preprocessed_python/.**  
+2. **Acquire the DEAP Dataset**  
+   Place the `data_preprocessed_python/` folder under the `./DEAP_Dataset/` directory (the code expects this structure by default). Each subject’s `.dat` file should be in `./DEAP_Dataset/data_preprocessed_python/`.
 
-3. **Obtain LLaMA weights (you must have authorization from Meta if using official weights). By default, the script references a model named "Llama-3.1-8B-Instruct", which should be present or downloaded locally.**
-   
-4. **Set up any environment variables (e.g., HUGGINGFACE_TOKEN) in a .env file if needed.**
+3. **Obtain LLaMA Weights**  
+   - You must have authorization from Meta to download official LLaMA weights.
+   - By default, the script references a model called `"Llama-3.1-8B-Instruct"` and downloads it locally via:
+     ```bash
+     huggingface-cli download meta-llama/Meta-Llama-3.1-8B-Instruct --local-dir Llama-3.1-8B-Instruct --exclude "original/*"
+     ```
+   - Update the `model_path` argument in the code if you are using a different local or remote model name.
 
-5. **Run all the cells in the jupyter notebook.**
-   This will:
-   - Preprocess the EEG data.  
-   - Create training/validation/test splits.
-   - Train the LLaMA-based classifier.
-   - Evaluate performance and show final results.
-   
+4. **Set Up Environment Variables** (Optional)  
+   - If you need a `HUGGINGFACE_TOKEN` for private model repos or for the Hugging Face Hub, place it in a `.env` file or specify it directly in the script.
+
+5. **Run the Scripts**  
+   - **Preprocessing and Training**: 
+     - The main script loads the DEAP data, preprocesses it (z-score normalization, segmentation, quantization), and then trains the model.  
+     - Adjust hyperparameters like `num_bins`, `window_size`, `overlap`, `batch_size`, and `learning_rate` in the code as needed.
+   - **Testing**:  
+     - After training, the script loads the best saved model weights and runs evaluation on the test split, printing final accuracies and saving a `test_results.txt`.
+
 ## Usage Notes
 
 - Hyperparameters such as num_bins, window_size, overlap, and training settings (batch_size, learning_rate, epochs) can be changed in the script.
-- Logging and checkpoints are saved in a Trainings/ directory.
+- Training artifacts, logs, and plots are saved in a timestamped folder under Trainings/.
 - System Requirements: GPU with sufficient memory is recommended (10GB+). The script uses 4-bit quantization to reduce GPU usage.
-
 
 ## Acknowledgments
 
