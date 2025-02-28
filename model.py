@@ -91,11 +91,13 @@ class LlamaEmotionClassifier(nn.Module):
 
         """
         Forward pass for the Llama model.
-        Use last_hidden_state for the final regression.
+        Uses the last hidden state for classification, 
+        but excludes padding tokens from the mean-pooling.
         Returns a 2D (batch_size, 2) => valence, arousal in [0,1].
 
         Args:
             input_ids (torch.Tensor): Input tensor for the model.
+            attention_mask (torch.Tensor): Attention mask to exclude padding tokens.
 
         Returns:
             torch.Tensor: Model output with reduced dimensionality for emotion classification.
@@ -110,8 +112,18 @@ class LlamaEmotionClassifier(nn.Module):
 
         last_hidden = outputs.hidden_states[-1]
 
-        # Mean-pool across seq_len
-        pooled = last_hidden.mean(dim=1)
+        # Masked mean-pool across seq_len (exclude padding by using attention_mask)
+        # 1) Expand attention_mask for broadcasting: [batch_size, seq_len] => [batch_size, seq_len, hidden_size]
+        mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden.size()).float()  # float for multiplication
+
+        # 2) Element-wise multiply to zero out padded positions, then sum over seq_len
+        sum_embeddings = torch.sum(last_hidden * mask_expanded, dim=1)  # [batch_size, hidden_size]
+
+        # 3) Count of valid (non-padded) tokens per sequence
+        sum_mask = torch.sum(mask_expanded, dim=1).clamp(min=1e-9)      # [batch_size, hidden_size]
+
+        # 4) Divide by count of non-padded tokens
+        pooled = sum_embeddings / sum_mask  # [batch_size, hidden_size]
 
         # Output => [batch_size, 6]
         logits = self.fc(pooled)

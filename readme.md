@@ -13,6 +13,7 @@ The project aims to classify, from the EEG signals in the **DEAP** dataset, **va
 2. **Modeling**
    - Uses a **LLaMA**-based model in **4-bit precision**.
    - Adds a **LoRA** (Low-Rank Adaptation) layer for parameter-efficient finetuning.
+   - Excludes Padding positions from the **Mean Pooling**, exploiting attention masks.
    - Includes a **classification head** that outputs **6 logits** (3 for valence + 3 for arousal).
 
 3. **Training and Testing**
@@ -55,7 +56,7 @@ pip install -U bitsandbytes transformers accelerate peft python-dotenv einops sc
    Make sure the folder structure preserves the code files (`model.py` or `model_definition.py`, plus the main script that handles preprocessing and training).
 
 2. **Acquire the DEAP Dataset**  
-   Place the `data_preprocessed_python/` folder under the `./DEAP_Dataset/` directory (the code expects this structure by default). Each subject’s `.dat` file should be in `./DEAP_Dataset/data_preprocessed_python/`.
+   Place the `data_preprocessed_python/` folder under the `./DEAP_Dataset/` directory. Each subject’s `.dat` file should be in `./DEAP_Dataset/data_preprocessed_python/`.
 
 3. **Obtain LLaMA Weights**  
    - You must have authorization from Meta to download official LLaMA weights.
@@ -70,16 +71,16 @@ pip install -U bitsandbytes transformers accelerate peft python-dotenv einops sc
 
 5. **Run the Scripts**  
    - **Preprocessing and Training**: 
-     - The main script loads the DEAP data, preprocesses it (z-score normalization, segmentation, quantization), and then trains the model.  
+     - The main script in the jupyter notebook loads the DEAP data, preprocesses it (z-score normalization, segmentation, quantization), and then trains the model.   
      - Adjust hyperparameters like `num_bins`, `window_size`, `overlap`, `batch_size`, and `learning_rate` in the code as needed.
    - **Testing**:  
      - After training, the script loads the best saved model weights and runs evaluation on the test split, printing final accuracies and saving a `test_results.txt`.
 
 ## Usage Notes
 
-- Hyperparameters such as num_bins, window_size, overlap, and training settings (batch_size, learning_rate, epochs) can be changed in the script.
-- Training artifacts, logs, and plots are saved in a timestamped folder under Trainings/.
-- System Requirements: GPU with sufficient memory is recommended (10GB+). The script uses 4-bit quantization to reduce GPU usage.
+- For Training, execute only the notebook sections: Installations (if not already installed), Imports and Directories (with directories modified as needed), Preprocessing (only the first time), Dataset, Model (which imports from model.py), Dataloader, and Training (where hyperparameters can be modified).
+- For Testing, execute only the notebook sections: Installations (if not already installed), Imports and Directories (with directories modified as needed), Dataset, Dataloader, and Testing (with directories modified as needed).
+- System Requirements: GPU with sufficient memory is recommended (20GB+). The script uses 4-bit quantization to reduce GPU usage.
 
 ## Acknowledgments
 
