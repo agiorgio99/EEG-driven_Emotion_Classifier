@@ -10,11 +10,22 @@ The project aims to classify, from the EEG signals in the **DEAP** dataset, **va
    - Converts signals into **overlapping segments**.
    - **Quantizes** the EEG amplitudes into discrete symbols (e.g., binary codes).
 
-2. **Modeling**
-   - Uses a **LLaMA**-based model in **4-bit precision**.
-   - Adds a **LoRA** (Low-Rank Adaptation) layer for parameter-efficient finetuning.
-   - Excludes Padding positions from the **Mean Pooling**, exploiting attention masks.
-   - Includes a **classification head** that outputs **6 logits** (3 for valence + 3 for arousal).
+2. **Model Architecture**
+   1. **Llama Backbone in 4-Bit**  
+      - Loads a pre-trained Llama model with **nf4** 4-bit quantization for efficient memory usage.  
+      - LoRA fine-tuning targets multiple projection layers with:
+      - **r = 16**  
+      - **lora_alpha = 8**  
+      - **lora_dropout = 0.1**  
+      - For the first 10 epochs, the Llama backbone is **frozen** to train only LoRA parameters, then fully unfrozen thereafter.
+
+   2. **Mean + Max Pooling**  
+      - After the final hidden states are obtained, the model performs **mean-pooling** and **max-pooling**, then **concatenates** these two outputs to form a single vector.
+
+   3. **Classification Head (4 Logits)**  
+      - A fully connected layer projects the concatenated vector into **4 logits**:
+      - **2 logits** for **valence** (binary classes: low vs. high),  
+      - **2 logits** for **arousal** (binary classes: low vs. high).  
 
 3. **Training and Testing**
    - Splits the dataset into **training**, **validation**, and **test** sets.

@@ -24,8 +24,8 @@ class LlamaEmotionClassifier(nn.Module):
 
         """
         Initialize the Llama-based model for valence & arousal 
-        classification into 3 classes (low,mid,high) for valence, and 3 classes for arousal 
-        => total 6 logits per sample.
+        classification into 2 classes (low,high) for valence, and 2 classes for arousal 
+        => total 4 logits per sample.
 
         Args:
             model_path (str): Local path to the pre-trained Llama model.
@@ -33,7 +33,7 @@ class LlamaEmotionClassifier(nn.Module):
             train_folder (str): Where model trainings are saved.
 
         Returns:
-            LlamaEmotionClassifier: An instance of the LlamaEmotionClassifier model with a linear regression head.
+            LlamaEmotionClassifier: An instance of the LlamaEmotionClassifier model with a classification head.
         """
 
         super(LlamaEmotionClassifier, self).__init__()
@@ -79,15 +79,26 @@ class LlamaEmotionClassifier(nn.Module):
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.model.resize_token_embeddings(len(self.tokenizer))
 
-        # 5) Classification head => hidden_size => 6
-        hidden_size = self.model.config.hidden_size
-        self.fc = nn.Linear(hidden_size, 6).to(self.device)
+        # 5) Classification head => hidden_size => 4
+        hidden_size = 32
+        self.fc = nn.Linear(hidden_size, 4).to(self.device)
+        self.proj = nn.Sequential(
+            nn.Linear(self.model.config.hidden_size, hidden_size),
+            nn.ReLU()
+        )
+        self.fc = nn.Sequential(
+            nn.Linear(2*hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, 4)
+        ).to(self.device)
+
+        # self.fc = nn.Linear(2 * self.model.config.hidden_size, 4).to(self.device)
 
         print("LlamaEmotionClassifier initialized.")
 
 
 
-    def forward(self, input_ids, attention_mask=None):
+    def forward(self, input_ids, attention_mask=None, freeze_llm=False):
 
         """
         Forward pass for the Llama model.
@@ -103,14 +114,24 @@ class LlamaEmotionClassifier(nn.Module):
             torch.Tensor: Model output with reduced dimensionality for emotion classification.
         """
         # Pass through Llama model => [batch_size, seq_len, hidden_size]
-        outputs = self.model(
+        grad_no_grad = torch.enable_grad if not freeze_llm else torch.no_grad
+        with grad_no_grad():
+            outputs = self.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 output_hidden_states=True,
                 return_dict=True
             )
+        # outputs = self.model(
+        #         input_ids=input_ids,
+        #         attention_mask=attention_mask,
+        #         output_hidden_states=True,
+        #         return_dict=True
+        #     )
 
         last_hidden = outputs.hidden_states[-1]
+        
+        # last_hidden = self.proj(last_hidden)
 
         # Masked mean-pool across seq_len (exclude padding by using attention_mask)
         # 1) Expand attention_mask for broadcasting: [batch_size, seq_len] => [batch_size, seq_len, hidden_size]
@@ -118,13 +139,15 @@ class LlamaEmotionClassifier(nn.Module):
 
         # 2) Element-wise multiply to zero out padded positions, then sum over seq_len
         sum_embeddings = torch.sum(last_hidden * mask_expanded, dim=1)  # [batch_size, hidden_size]
+        max_embeddings = torch.max(last_hidden * mask_expanded, dim=1).values
 
         # 3) Count of valid (non-padded) tokens per sequence
         sum_mask = torch.sum(mask_expanded, dim=1).clamp(min=1e-9)      # [batch_size, hidden_size]
 
         # 4) Divide by count of non-padded tokens
-        pooled = sum_embeddings / sum_mask  # [batch_size, hidden_size]
+        mean_embeddings = sum_embeddings / sum_mask  # [batch_size, hidden_size]
 
+        pooled = torch.hstack((mean_embeddings, max_embeddings))
         # Output => [batch_size, 6]
         logits = self.fc(pooled)
 
@@ -133,16 +156,16 @@ class LlamaEmotionClassifier(nn.Module):
 
     def compute_loss_and_accuracy(self, logits, labels):
         """
-        logits: [batch_size, 6]
-          first 3 => valence logits
-          next 3  => arousal logits
+        logits: [batch_size, 4]
+          first 2 => valence logits
+          next 2  => arousal logits
         labels: [batch_size, 2] => [valence_class, arousal_class]
 
         Returns: loss, val_acc, aro_acc, overall_acc
         """
         batch_size = logits.size(0)
-        val_logits = logits[:, :3]  # shape [batch_size, 3]
-        aro_logits = logits[:, 3:]  # shape [batch_size, 3]
+        val_logits = logits[:, :2]  # shape [batch_size, 2]
+        aro_logits = logits[:, 2:]  # shape [batch_size, 2]
 
         val_labels = labels[:, 0]   # shape [batch_size]
         aro_labels = labels[:, 1]   # shape [batch_size]
@@ -201,6 +224,11 @@ class LlamaEmotionClassifier(nn.Module):
         self.val_losses = []
         self.train_overall_accs = []
         self.val_overall_accs = []
+        self.train_val_accs = []
+        self.val_val_accs = []
+        self.train_aro_accs = []
+        self.val_aro_accs = []
+
 
         for epoch in range(hparams["epochs"]):
             # -------------------------
@@ -220,7 +248,7 @@ class LlamaEmotionClassifier(nn.Module):
                 attention_mask = batch["attention_mask"].to(self.device)
                 labels = batch["labels"].to(self.device)
 
-                logits = self(input_ids, attention_mask)
+                logits = self(input_ids, attention_mask, freeze_llm=epoch<10)
                 loss, val_acc, aro_acc, overall_acc = self.compute_loss_and_accuracy(logits, labels)
 
                 loss.backward()
@@ -286,6 +314,10 @@ class LlamaEmotionClassifier(nn.Module):
             self.val_losses.append(epoch_val_loss)
             self.train_overall_accs.append(epoch_train_overall_acc)
             self.val_overall_accs.append(epoch_val_overall_acc)
+            self.train_val_accs.append(epoch_train_val_acc)
+            self.val_val_accs.append(epoch_val_val_acc)
+            self.train_aro_accs.append(epoch_train_aro_acc)
+            self.val_aro_accs.append(epoch_val_aro_acc)
 
             # Print a short summary
             print(f"\n[Epoch {epoch+1}/{hparams['epochs']}]")
@@ -329,8 +361,8 @@ class LlamaEmotionClassifier(nn.Module):
                 _, val_acc, aro_acc, overall_acc = self.compute_loss_and_accuracy(logits, labels)
                 batch_accuracies.append(overall_acc)
 
-                val_logits = logits[:, :3]
-                aro_logits = logits[:, 3:]
+                val_logits = logits[:, :2]
+                aro_logits = logits[:, 2:]
                 val_preds = torch.argmax(val_logits, dim=1)
                 aro_preds = torch.argmax(aro_logits, dim=1)
 
@@ -428,39 +460,117 @@ class LlamaEmotionClassifier(nn.Module):
 
     def plot_training_curves(self):
         """
-        Plot & save training vs. validation curves for loss & overall accuracy
+        Plot & save training vs. validation curves for:
+        - Loss
+        - Overall Accuracy
+        - Valence Accuracy
+        - Arousal Accuracy
         """
+        # 1) Check we have data
         if not hasattr(self, "train_losses") or not hasattr(self, "val_losses"):
-            return  # no data
+            print("No loss data found. Cannot plot.")
+            return
+        
+        needed_accs = [
+            "train_overall_accs", "val_overall_accs",
+            "train_val_accs", "val_val_accs",
+            "train_aro_accs", "val_aro_accs"
+        ]
+        for acc in needed_accs:
+            if not hasattr(self, acc):
+                print(f"No data found for {acc}. Did you store it during training?")
+                return
 
-        # Loss curve
-        epochs = range(1, len(self.train_losses) + 1)
+        # 2) Helper function to plot a curve with
+        #    integer x-axis ticks, y in [0..1], and data labels.
+        def plot_accuracy_with_labels(x, y, label):
+            """
+            Plots a curve with circular markers, integer x ticks,
+            and annotated decimal values at each point.
+            """
+            plt.plot(x, y, label=label, marker='o')
+            # Annotate each point with its accuracy
+            for idx, val in enumerate(y):
+                plt.annotate(f"{val:.3f}", (x[idx], val),
+                            textcoords="offset points",
+                            xytext=(0, 5),
+                            ha='center')  # labels slightly above each marker
+            # Force y-limits to [0,1] for accuracy
+            plt.ylim(0, 1)
+            # Force x-axis to display integer ticks from 1..epochs
+            plt.xticks(x)
 
-        plt.figure(figsize=(12, 5))
-        # Left: Loss
-        plt.subplot(1, 2, 1)
-        plt.plot(epochs, self.train_losses, label="Train Loss")
-        plt.plot(epochs, self.val_losses, label="Val Loss")
+        epochs = list(range(1, len(self.train_losses) + 1))
+
+        # ------------------
+        #  PLOT 1: LOSS
+        # ------------------
+        plt.figure()
+        plt.plot(epochs, self.train_losses, label="Train Loss", marker='o')
+        plt.plot(epochs, self.val_losses,   label="Val Loss",   marker='o')
         plt.title("Loss per Epoch")
         plt.xlabel("Epoch")
         plt.ylabel("CrossEntropy Loss")
+        plt.xticks(epochs)  # integer ticks for epochs
         plt.legend()
+        if hasattr(self, "save_folder"):
+            loss_path = os.path.join(self.save_folder, "loss_curves.png")
+            plt.savefig(loss_path)
+            plt.close()
+            print(f"Loss curves saved to {loss_path}")
+        else:
+            plt.show()
 
-        # Right: Accuracy
-        plt.subplot(1, 2, 2)
-        plt.plot(epochs, self.train_overall_accs, label="Train Overall Acc")
-        plt.plot(epochs, self.val_overall_accs, label="Val Overall Acc")
+        # ------------------------------
+        #  PLOT 2: OVERALL ACCURACY
+        # ------------------------------
+        plt.figure()
+        plot_accuracy_with_labels(epochs, self.train_overall_accs, "Train Overall Acc")
+        plot_accuracy_with_labels(epochs, self.val_overall_accs,   "Val Overall Acc")
         plt.title("Overall Accuracy per Epoch")
         plt.xlabel("Epoch")
         plt.ylabel("Accuracy")
         plt.legend()
-
-        plt.tight_layout()
-
         if hasattr(self, "save_folder"):
-            plot_path = os.path.join(self.save_folder, "training_curves.png")
-            plt.savefig(plot_path)
+            overall_path = os.path.join(self.save_folder, "overall_accuracy_curves.png")
+            plt.savefig(overall_path)
             plt.close()
-            print(f"Training curves saved to {plot_path}")
+            print(f"Overall accuracy curves saved to {overall_path}")
+        else:
+            plt.show()
+
+        # -----------------------------
+        #  PLOT 3: VALENCE ACCURACY
+        # -----------------------------
+        plt.figure()
+        plot_accuracy_with_labels(epochs, self.train_val_accs, "Train Valence Acc")
+        plot_accuracy_with_labels(epochs, self.val_val_accs,   "Val Valence Acc")
+        plt.title("Valence Accuracy per Epoch")
+        plt.xlabel("Epoch")
+        plt.ylabel("Accuracy")
+        plt.legend()
+        if hasattr(self, "save_folder"):
+            valence_path = os.path.join(self.save_folder, "valence_accuracy_curves.png")
+            plt.savefig(valence_path)
+            plt.close()
+            print(f"Valence accuracy curves saved to {valence_path}")
+        else:
+            plt.show()
+
+        # -----------------------------
+        #  PLOT 4: AROUSAL ACCURACY
+        # -----------------------------
+        plt.figure()
+        plot_accuracy_with_labels(epochs, self.train_aro_accs, "Train Arousal Acc")
+        plot_accuracy_with_labels(epochs, self.val_aro_accs,   "Val Arousal Acc")
+        plt.title("Arousal Accuracy per Epoch")
+        plt.xlabel("Epoch")
+        plt.ylabel("Accuracy")
+        plt.legend()
+        if hasattr(self, "save_folder"):
+            arousal_path = os.path.join(self.save_folder, "arousal_accuracy_curves.png")
+            plt.savefig(arousal_path)
+            plt.close()
+            print(f"Arousal accuracy curves saved to {arousal_path}")
         else:
             plt.show()
