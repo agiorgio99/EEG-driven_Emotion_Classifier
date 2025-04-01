@@ -1,6 +1,6 @@
 # EEG-Based Emotion Recognition Using LLaMA
 
-The project aims to classify, from the EEG signals in the **DEAP** dataset, **valence and arousal** emotions into three discrete levels each, leveraging **LoRA** finetuning on **LLaMA 3.1 8B** model. The code is now divided into two files: one jupyter notebook (*EEG_Driven_Emotion_Classifier.ipynb*) handling data preprocessing, loading, training, and testing, and a separate python file (*model.py*) containing the model definition.
+The project aims to classify, from the EEG signals in the **DEAP** dataset, **valence and arousal** emotions into two discrete levels each, leveraging **LoRA** finetuning on **LLaMA 3.1 8B** model. The code is now divided into two files: one jupyter notebook (*EEG_Driven_Emotion_Classifier.ipynb*) handling data preprocessing, loading, training, and testing, and a separate python file (*model.py*) containing the model definition.
 
 ## Method Overview
 
